@@ -1,5 +1,6 @@
 osservati/
-*/modelli_allenati
+*/modelli_allenati/
+*/modelli_allenati_*/
 */__pycache__/
 __pycache__/
 temperatura/climatologie/

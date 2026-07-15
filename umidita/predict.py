@@ -45,8 +45,8 @@ os.makedirs(cartella_previsioni, exist_ok=True)
 df_stazioni = pd.read_csv(f'{cartella_lavoro}/umidita/df_coordinate.csv', index_col=0)
 
 for stazione in df_stazioni.index:
-    if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
-        continue
+    # if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
+    #     continue
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
     
@@ -71,7 +71,7 @@ for stazione in df_stazioni.index:
         df_previsioni.columns = [f'QRF media {x}' for x in df_previsioni.columns]
         
         if modello == 'ecita':
-            df_raw = pd.DataFrame(relative_humidity_from_dewpoint(X['2t'].values * units.degC, X['2d'].values * units.degC).to('percent').magnitude, index=X.index, columns=[modello])
+            df_raw = pd.DataFrame(relative_humidity_from_dewpoint(X['2t'].values * units.degK, X['2d'].values * units.degK).to('percent').magnitude, index=X.index, columns=[modello])
         else:
             raise
             

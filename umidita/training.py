@@ -100,11 +100,11 @@ for stazione in df_stazioni.index:
                 df_previsioni.columns = [f'QRF_{x}' for x in df_previsioni.columns]
                 
                 if modello == 'ecita':
-                    raw = relative_humidity_from_dewpoint(X_test['2t'].values * units.degC, X_test['2d'].values * units.degC).to('percent').magnitude
+                    raw = relative_humidity_from_dewpoint(X_test['2t'].values * units.degK, X_test['2d'].values * units.degK).to('percent').magnitude
                 else:
                     raise
                 df_raw = pd.DataFrame(raw, index=X_test.index, columns=[f'Raw_{modello}'])
-                
+
                 df_errori_raw = f_errori_regressione(y_test, df_raw, nome_df=f'{stazione}_{intervallo}_raw_test')
                 df_errori_prev = f_errori_regressione(y_test, df_previsioni['QRF_media'], nome_df=f'{stazione}_{intervallo}_prev_test')
                 
