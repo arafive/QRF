@@ -198,7 +198,6 @@ for stazione in df_stazioni.index:
 
                 fig.tight_layout()
                 plt.show()
-                sss
 
             ################################ Salvataggi
 
