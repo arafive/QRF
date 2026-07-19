@@ -51,7 +51,8 @@ for stazione in df_tutte_le_coordinate.index:
                 f.seek(-chunk_size, os.SEEK_END)
                 tail = f.read()
                 righe = tail.split(b'\n')
-                if righe and righe[-1] == b'':
+                newline_finale = bool(righe and righe[-1] == b'')
+                if newline_finale:
                     righe.pop()  # scarta l'elemento vuoto dovuto al newline finale del file
                 if len(righe) >= 2 or chunk_size == filesize:
                     break
@@ -63,7 +64,9 @@ for stazione in df_tutte_le_coordinate.index:
             t0 = (penultimo_timestamp + pd.Timedelta(hours=1)).strftime('%Y%m%d%H%M')
 
             # tronca il file rimuovendo l'ultima riga: verrà riscritta dalla nuova query
-            nuova_dimensione = filesize - len(ultima_riga_bytes) - 1  # -1 per il newline finale
+            # -1 solo se il file terminava davvero con \n; se l'ultima riga era già
+            # troncata a metà (scrittura precedente interrotta), non c'è newline da togliere
+            nuova_dimensione = filesize - len(ultima_riga_bytes) - (1 if newline_finale else 0)
             with open(percorso_csv, 'r+b') as f:
                 f.truncate(nuova_dimensione)
         else:
