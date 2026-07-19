@@ -13,8 +13,10 @@ import pandas as pd
 from metpy.calc import wind_direction
 from metpy.units import units
 
-# cartella_lavoro = '/run/media/daniele.carnevale/Daniele2TB/repo/QRF'
-cartella_lavoro = '/media/daniele/Daniele2TB/repo/QRF'
+sys.path.insert(0, os.path.expanduser('~/.config'))
+from config_percorsi_Daniele import CARTELLA_REPO_ROOT
+
+cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
 from funzioni import f_apri_pickle
@@ -32,14 +34,15 @@ else:
 
 print(data)
 
+
 modello = config.get('COMMON', 'modello')
-cartella_modelli_allenati = config.get('COMMON', 'cartella_modelli_allenati')
-cartella_dataset = config.get('COMMON', 'cartella_dataset')
+cartella_modelli_allenati = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_modelli_allenati')}", f'vento/modelli_allenati/{modello}')
+cartella_dataset = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_dataset')}")
 quantili = ast.literal_eval(config.get('COMMON', 'quantili'))
 
 percorso_data = f"{data.strftime('%Y/%m/%d')}"
 
-cartella_previsioni = f"{config.get('COMMON', 'cartella_previsioni')}/vento/{modello}/{percorso_data}"
+cartella_previsioni = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_previsioni')}/vento/{modello}/{percorso_data}")
 os.makedirs(cartella_previsioni, exist_ok=True)
 
 # %%
@@ -51,10 +54,8 @@ for stazione in df_stazioni.index:
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
     
-    cartella_modelli_allenati = f"{config.get('COMMON', 'cartella_modelli_allenati')}/vento/modelli_allenati/{modello}/{stazione}"
-
     try:
-        tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(cartella_modelli_allenati) if x.endswith('.pkl')])
+        tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(f'{cartella_modelli_allenati}/{stazione}') if x.endswith('.pkl')])
     except FileNotFoundError:
         continue
     
@@ -64,7 +65,7 @@ for stazione in df_stazioni.index:
     
     for intervallo in ['0_24', '24_48', '48_72']:
         ### La WSPDM c'è sempre
-        dict_WSPDM = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_WSPDM.pkl')
+        dict_WSPDM = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_WSPDM.pkl')
         modello_WSPDM = dict_WSPDM['modello']
         
         X = pd.read_csv(f"{cartella_dataset}/{modello}/df_{stazione}_{intervallo}_{data.strftime('%Y%m%d')}.csv", index_col=0, parse_dates=True)
@@ -101,12 +102,12 @@ for stazione in df_stazioni.index:
         df_previsioni_tot_WSPDM = f_fai_le_previsioni('WSPDM', modello_WSPDM, df_previsioni_tot_WSPDM)
         
         if 'WDIRP' in tipo_di_previsioni:
-            dict_WDIRP = f_apri_pickle(f'{cartella_modelli_allenati}/RF_{stazione}_{intervallo}_WDIRP.pkl')
+            dict_WDIRP = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/RF_{stazione}_{intervallo}_WDIRP.pkl')
             modello_WDIRP = dict_WDIRP['modello']
             df_previsioni_tot_WDIRP = f_fai_le_previsioni('WDIRP', modello_WDIRP, df_previsioni_tot_WDIRP)
 
         if 'WSPDX' in tipo_di_previsioni:
-            dict_WSPDX = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_WSPDX.pkl')
+            dict_WSPDX = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_WSPDX.pkl')
             modello_WSPDX = dict_WSPDX['modello']
             df_previsioni_tot_WSPDX = f_fai_le_previsioni('WSPDX', modello_WSPDX, df_previsioni_tot_WSPDX)
 

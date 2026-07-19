@@ -5,6 +5,7 @@ warnings.simplefilter('ignore', UserWarning)
 warnings.filterwarnings('ignore', message='IProgress not found.*')
 
 import os
+import sys
 import ast
 import time
 import configparser
@@ -19,8 +20,10 @@ from tabulate import tabulate
 
 plt.rc('font', weight='normal', size=6)
 
-# cartella_lavoro = '/run/media/daniele.carnevale/Daniele2TB/repo/QRF'
-cartella_lavoro = '/media/daniele/Daniele2TB/repo/QRF'
+sys.path.insert(0, os.path.expanduser('~/.config'))
+from config_percorsi_Daniele import CARTELLA_REPO_ROOT
+
+cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
 from funzioni import QRF_model

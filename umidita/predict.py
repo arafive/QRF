@@ -13,8 +13,10 @@ import pandas as pd
 from metpy.calc import relative_humidity_from_dewpoint
 from metpy.units import units
 
-# cartella_lavoro = '/run/media/daniele.carnevale/Daniele2TB/repo/QRF'
-cartella_lavoro = '/media/daniele/Daniele2TB/repo/QRF'
+sys.path.insert(0, os.path.expanduser('~/.config'))
+from config_percorsi_Daniele import CARTELLA_REPO_ROOT
+
+cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
 from funzioni import f_apri_pickle
@@ -32,32 +34,30 @@ else:
 print(data)
 
 modello = config.get('COMMON', 'modello')
-cartella_modelli_allenati = config.get('COMMON', 'cartella_modelli_allenati')
-cartella_dataset = config.get('COMMON', 'cartella_dataset')
+cartella_modelli_allenati = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_modelli_allenati')}", f'umidita/modelli_allenati/{modello}')
+cartella_dataset = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_dataset')}")
 quantili = ast.literal_eval(config.get('COMMON', 'quantili'))
 
 percorso_data = f"{data.strftime('%Y/%m/%d')}"
 
-cartella_previsioni = f"{config.get('COMMON', 'cartella_previsioni')}/umidita/{modello}/{percorso_data}"
+cartella_previsioni = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_previsioni')}/umidita/{modello}/{percorso_data}")
 os.makedirs(cartella_previsioni, exist_ok=True)
 
 # %%
 df_stazioni = pd.read_csv(f'{cartella_lavoro}/umidita/df_coordinate.csv', index_col=0)
 
 for stazione in df_stazioni.index:
-    # if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
-    #     continue
+    if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
+        continue
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
     
-    cartella_modelli_allenati = f"{config.get('COMMON', 'cartella_modelli_allenati')}/umidita/modelli_allenati/{modello}/{stazione}"
-    
-    tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(cartella_modelli_allenati) if x.endswith('.pkl')])
+    tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(f'{cartella_modelli_allenati}/{stazione}') if x.endswith('.pkl')])
     
     df_previsioni_tot = pd.DataFrame()
     
     for intervallo in ['0_24', '24_48', '48_72']:
-        dict_modello = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_REHUM.pkl')
+        dict_modello = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_REHUM.pkl')
         
         X = pd.read_csv(f"{cartella_dataset}/{modello}/df_{stazione}_{intervallo}_{data.strftime('%Y%m%d')}.csv", index_col=0, parse_dates=True)
         X['10gust3max'] = X['10gust3max'].interpolate(method='linear', limit_direction='both')

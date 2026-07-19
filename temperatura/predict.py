@@ -10,8 +10,10 @@ locale.setlocale(locale.LC_TIME, 'it_IT.UTF-8')
 import numpy as np
 import pandas as pd
 
-# cartella_lavoro = '/run/media/daniele.carnevale/Daniele2TB/repo/QRF'
-cartella_lavoro = '/media/daniele/Daniele2TB/repo/QRF'
+sys.path.insert(0, os.path.expanduser('~/.config'))
+from config_percorsi_Daniele import CARTELLA_REPO_ROOT
+
+cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
 from funzioni import f_apri_pickle
@@ -29,13 +31,13 @@ else:
 print(data)
 
 modello = config.get('COMMON', 'modello')
-cartella_modelli_allenati = config.get('COMMON', 'cartella_modelli_allenati')
-cartella_dataset = config.get('COMMON', 'cartella_dataset')
+cartella_modelli_allenati = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_modelli_allenati')}", f'temperatura/modelli_allenati/{modello}')
+cartella_dataset = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_dataset')}")
 quantili = ast.literal_eval(config.get('COMMON', 'quantili'))
 
 percorso_data = f"{data.strftime('%Y/%m/%d')}"
 
-cartella_previsioni = f"{config.get('COMMON', 'cartella_previsioni')}/temperatura/{modello}/{percorso_data}"
+cartella_previsioni = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_previsioni')}/temperatura/{modello}/{percorso_data}")
 os.makedirs(cartella_previsioni, exist_ok=True)
 
 # %%
@@ -46,10 +48,8 @@ for stazione in df_stazioni.index:
         continue
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
-    
-    cartella_modelli_allenati = f"{config.get('COMMON', 'cartella_modelli_allenati')}/temperatura/modelli_allenati/{modello}/{stazione}"
 
-    tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(cartella_modelli_allenati) if x.endswith('.pkl')])
+    tipo_di_previsioni = set([x.split('_')[-1].split('.')[0] for x in os.listdir(f'{cartella_modelli_allenati}/{stazione}') if x.endswith('.pkl')])
     
     df_previsioni_tot_TEMPN = pd.DataFrame()
     df_previsioni_tot_TEMPM = pd.DataFrame()
@@ -57,7 +57,7 @@ for stazione in df_stazioni.index:
     
     for intervallo in ['0_24', '24_48', '48_72']:
         ### La TEMPM c'è sempre
-        dict_TEMPM = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_TEMPM.pkl')
+        dict_TEMPM = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_TEMPM.pkl')
         modello_TEMPM = dict_TEMPM['modello']
         
         X = pd.read_csv(f"{cartella_dataset}/{modello}/df_{stazione}_{intervallo}_{data.strftime('%Y%m%d')}.csv", index_col=0, parse_dates=True)
@@ -88,10 +88,10 @@ for stazione in df_stazioni.index:
         df_previsioni_tot_TEMPM = f_fai_le_previsioni('TEMPM', modello_TEMPM, df_previsioni_tot_TEMPM)
         
         if 'TEMPN' in tipo_di_previsioni:
-            dict_TEMPN = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_TEMPN.pkl')
+            dict_TEMPN = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_TEMPN.pkl')
             modello_TEMPN = dict_TEMPN['modello']
 
-            dict_TEMPX = f_apri_pickle(f'{cartella_modelli_allenati}/QRF_{stazione}_{intervallo}_TEMPX.pkl')
+            dict_TEMPX = f_apri_pickle(f'{cartella_modelli_allenati}/{stazione}/QRF_{stazione}_{intervallo}_TEMPX.pkl')
             modello_TEMPX = dict_TEMPX['modello']
 
             df_previsioni_tot_TEMPN = f_fai_le_previsioni('TEMPN', modello_TEMPN, df_previsioni_tot_TEMPN)
@@ -103,7 +103,7 @@ for stazione in df_stazioni.index:
     
     ####################
     
-    df_clima_stazione = pd.read_csv(f"{config.get('COMMON', 'cartella_climatologie')}/{stazione}.csv", index_col=0, parse_dates=True)
+    df_clima_stazione = pd.read_csv(f"./temperatura/climatologie/{stazione}.csv", index_col=0, parse_dates=True)
     
     anno = df_previsioni_tot_TEMPM.index[0].year
     if df_previsioni_tot_TEMPM.shape[0] == 72:
