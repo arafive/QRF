@@ -1021,6 +1021,7 @@ CONFIG_INDICI_BOUNDED = {
     'accuracy':             (50,    0, 100, 'max'),
     'balanced_accuracy':    (50,    0, 100, 'max'),
     'prevalence_threshold': (0.5,   0, 1,   'min'),
+    'precision[1]_risc_50': (0.5, 0, 1, 'max')
 }
 
 # indici a rapporto (non bounded, valore neutro/non-informativo = 1): scala logaritmica
@@ -1125,3 +1126,185 @@ def f_plot_heatmap_verifica(df_verifica, righe=None, escludi_righe=RIGHE_ESCLUSE
     if percorso_salvataggio:
         fig.savefig(percorso_salvataggio, dpi=200, bbox_inches='tight')
     return fig, ax
+
+
+def f_eda_calibrazione(df, nome="", soglia_wet=0.2):
+    prev, obs = df['prev'], df['obs']
+    n = len(df)
+
+    frac_wet_obs = (obs >= soglia_wet).mean()
+    frac_wet_prev = (prev >= soglia_wet).mean()
+    print(f"--- {nome} (n={n}) ---")
+    print(f"Frazione wet - obs: {frac_wet_obs:.3f}  prev: {frac_wet_prev:.3f}")
+
+    obs_wet = obs[obs >= soglia_wet]
+    prev_wet = prev[prev >= soglia_wet]
+    print(f"Obs wet  - mean: {obs_wet.mean():.2f}  std: {obs_wet.std():.2f}  skew: {stats.skew(obs_wet):.2f}")
+    print(f"Prev wet - mean: {prev_wet.mean():.2f}  std: {prev_wet.std():.2f}  skew: {stats.skew(prev_wet):.2f}")
+
+    rho, pval = stats.spearmanr(prev, obs, nan_policy='omit')
+    print(f"Spearman rho: {rho:.3f} (p={pval:.1e})")
+
+    for q in [0.95, 0.99, 0.995, 0.999]:
+        soglia_q = obs.quantile(q)
+        print(f"  q{q}: obs={soglia_q:.1f}mm  prev={prev.quantile(q):.1f}mm  n_oltre_obs={int((obs > soglia_q).sum())}")
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 9))
+    axes[0,0].hist(np.log1p(obs_wet), bins=30, alpha=0.6, label='obs', density=True)
+    axes[0,0].hist(np.log1p(prev_wet), bins=30, alpha=0.6, label='prev', density=True)
+    axes[0,0].set_xlabel('log1p(mm)')
+    axes[0,0].set_title('Distribuzione (solo wet)')
+    axes[0,0].legend()
+
+    axes[0,1].hexbin(prev, obs, gridsize=30, mincnt=1, bins='log')
+    lim = max(prev.max(), obs.max())
+    axes[0,1].plot([0, lim], [0, lim], 'r--', lw=1)
+    axes[0,1].set_xlabel('prev (mm)')
+    axes[0,1].set_ylabel('obs (mm)')
+    axes[0,1].set_title('Obs vs Prev (hexbin, scala log)')
+
+    bins = [-0.01, soglia_wet, 1, 5, 10, 20, 50, np.inf]
+    labels = ['0', '0-1', '1-5', '5-10', '10-20', '20-50', '50+']
+    df_tmp = df.copy()
+    df_tmp['bin_prev'] = pd.cut(df_tmp['prev'], bins=bins, labels=labels)
+    df_tmp.boxplot(column='obs', by='bin_prev', ax=axes[1,0])
+    axes[1,0].set_xlabel('bin prev (mm)')
+    axes[1,0].set_ylabel('obs (mm)')
+    axes[1,0].set_title('Obs condizionato al bin di prev')
+
+    fig.suptitle(f"EDA calibrazione — {nome}")
+
+    stats.probplot(obs_wet, dist=stats.gamma, sparams=stats.gamma.fit(obs_wet, floc=0), plot=axes[1,1])
+
+    stats.probplot(obs_wet, dist=stats.gamma, sparams=stats.gamma.fit(obs_wet, floc=0), plot=axes[1,1])
+    axes[1,1].set_title('QQ-plot obs wet vs Gamma')
+
+    plt.tight_layout()
+    plt.show()
+    plt.close()
+
+    return {'n': n, 'frac_wet_obs': frac_wet_obs, 'frac_wet_prev': frac_wet_prev, 'spearman_rho': rho, 'obs_wet': obs_wet, 'prev_wet': prev_wet}
+
+
+def f_soglia_ottima_fbeta(y_bin, prob, beta=1.0):
+    """
+    Cerca, tra le soglie di decisione candidate, quella che massimizza l'F-beta
+    score (beta=1 -> F1; beta>1 pesa la recall piu' della precision - utile in
+    ottica di Protezione Civile per non perdere eventi intensi, vedi appunti
+    del collega). Usa precision_recall_curve invece di richiamare fbeta_score
+    soglia per soglia: precision e recall sono gia' quelli esatti a ogni soglia
+    candidata, quindi l'F-beta si calcola in un colpo solo su tutto l'array
+    (stesso risultato del loop, molto piu' efficiente).
+    """
+    precisioni, richiami, soglie = precision_recall_curve(y_bin, prob)
+    precisioni, richiami = precisioni[:-1], richiami[:-1]  # l'ultimo punto non ha soglia associata
+    with np.errstate(divide='ignore', invalid='ignore'):
+        fbeta = (1 + beta ** 2) * precisioni * richiami / ((beta ** 2) * precisioni + richiami)
+    fbeta = np.nan_to_num(fbeta, nan=0.0)
+    idx_ottimo = np.argmax(fbeta)
+    return soglie[idx_ottimo], fbeta[idx_ottimo]
+
+
+def f_soglia_ottima_hss(y_bin, prob):
+    """
+    Cerca, tra le soglie di decisione candidate, quella che massimizza l'HSS
+    (Heidke Skill Score). Vettorizzato: ordina le probabilita' in modo
+    decrescente e calcola TP/FP/FN/TN cumulati al variare della soglia,
+    senza ricostruire la matrice di confusione punto per punto.
+    """
+    y_bin = np.asarray(y_bin)
+    prob = np.asarray(prob)
+    P = y_bin.sum()
+    N = len(y_bin) - P
+
+    ordine = np.argsort(-prob)
+    y_ordinato = y_bin[ordine]
+    prob_ordinato = prob[ordine]
+
+    tp_cum = np.cumsum(y_ordinato)
+    fp_cum = np.cumsum(1 - y_ordinato)
+    fn_cum = P - tp_cum
+    tn_cum = N - fp_cum
+
+    numeratore = 2 * (tp_cum * tn_cum - fp_cum * fn_cum)
+    denominatore = (tp_cum + fn_cum) * (fn_cum + tn_cum) + (tp_cum + fp_cum) * (fp_cum + tn_cum)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        hss = np.where(denominatore != 0, numeratore / denominatore, 0.0)
+
+    idx_ottimo = np.argmax(hss)
+    return prob_ordinato[idx_ottimo], hss[idx_ottimo]
+
+
+def f_precision_riscalata(precision, prevalenza_originale, prevalenza_target):
+    """
+    Riscala la precision da un dataset con prevalenza 'prevalenza_originale' a
+    quella che si otterrebbe con 'prevalenza_target', a parita' di potere
+    discriminante del classificatore (Cavaiola et al. 2024, Nat. Commun., Eq. 8).
+    Utile per confrontare la precision tra stazioni/intervalli con prevalenza
+    wet diversa, o tra raw e modello se le loro soglie implicano prevalenze
+    diverse nel test set.
+    """
+    p, p_target = prevalenza_originale, prevalenza_target
+    fattore = (p - p_target) / (p_target * (1 - p))
+    return precision / (1 + fattore * (1 - precision))
+
+
+def f_dewpoint(t_kelvin, q, p_hpa):
+    """
+    Temperatura di rugiada (°C) da temperatura (K), umidita' specifica (kg/kg)
+    e pressione (hPa), via tensione di vapore + formula di Magnus invertita.
+    """
+    t_celsius = t_kelvin - 273.15
+    e = q * p_hpa / (0.622 + 0.378 * q)  # tensione di vapore, hPa
+    e = np.clip(e, 1e-6, None)  # evita log(0) o log(negativo) per q~0
+    a, b = 17.625, 243.04
+    alpha = np.log(e / 6.1094)
+    td_celsius = (b * alpha) / (a - alpha)
+    return td_celsius
+
+
+def f_aggiungi_indici_instabilita(df):
+    """
+    Aggiunge lapse rate 850-500, K-index e Total Totals index, calcolati dalle
+    colonne t_XXX/q_XXX gia' presenti (nessuna estrazione GRIB aggiuntiva).
+
+    ATTENZIONE UNITA': assume t_XXX in Kelvin e q_XXX in kg/kg. Dato che hai gia'
+    avuto un bug di unita' C/K nel calcolo dell'RH in passato, controlla prima
+    con df[['t_850','t_700','t_500']].describe(): valori ~250-300 -> Kelvin (ok
+    cosi'), valori ~-30/+40 -> Celsius (togli il "- 273.15" da f_dewpoint e da
+    qui sotto).
+    """
+    df = df.copy()
+
+    df['lapse_rate_850_500'] = df['t_850'] - df['t_500']
+
+    df['td_850'] = f_dewpoint(df['t_850'], df['q_850'], 850)
+    df['td_700'] = f_dewpoint(df['t_700'], df['q_700'], 700)
+
+    t_850_c = df['t_850'] - 273.15
+    t_700_c = df['t_700'] - 273.15
+    t_500_c = df['t_500'] - 273.15
+
+    df['k_index'] = (t_850_c - t_500_c) + df['td_850'] - (t_700_c - df['td_700'])
+    df['total_totals'] = (t_850_c + df['td_850']) - 2 * t_500_c
+
+    return df
+
+
+def f_aggiungi_wind_shear(df, livello_basso='925', livello_alto='500'):
+    """
+    Aggiunge componenti e modulo dello shear del vento tra due livelli di
+    pressione (default 925-500hPa, i due livelli piu' estremi che hai tra
+    quelli disponibili).
+    """
+    df = df.copy()
+
+    du = df[f'u_{livello_alto}'] - df[f'u_{livello_basso}']
+    dv = df[f'v_{livello_alto}'] - df[f'v_{livello_basso}']
+
+    df[f'shear_u_{livello_basso}_{livello_alto}'] = du
+    df[f'shear_v_{livello_basso}_{livello_alto}'] = dv
+    df[f'shear_mod_{livello_basso}_{livello_alto}'] = np.sqrt(du**2 + dv**2)
+
+    return df
