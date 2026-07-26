@@ -1259,7 +1259,13 @@ def f_dewpoint(t_kelvin, q, p_hpa):
     e = q * p_hpa / (0.622 + 0.378 * q)  # tensione di vapore, hPa
     e = np.clip(e, 1e-6, None)  # evita log(0) o log(negativo) per q~0
     a, b = 17.625, 243.04
+
     alpha = np.log(e / 6.1094)
+    # La formula ha un asintoto per alpha -> a: q anomali (es. unita' sbagliate,
+    # g/kg invece di kg/kg) o valori fisicamente estremi mandano il denominatore
+    # verso zero, producendo +inf. Si tiene alpha a distanza di sicurezza.
+    alpha = np.clip(alpha, None, a - 1e-3)
+
     td_celsius = (b * alpha) / (a - alpha)
     return td_celsius
 
@@ -1307,4 +1313,189 @@ def f_aggiungi_wind_shear(df, livello_basso='925', livello_alto='500'):
     df[f'shear_v_{livello_basso}_{livello_alto}'] = dv
     df[f'shear_mod_{livello_basso}_{livello_alto}'] = np.sqrt(du**2 + dv**2)
 
+    return df
+
+
+import numpy as np
+from metpy.calc import (
+    virtual_temperature, mixing_ratio_from_specific_humidity,
+    equivalent_potential_temperature, dewpoint_from_specific_humidity
+)
+from metpy.units import units
+
+LIVELLI_HPA = [1000, 950, 925, 900, 850, 800, 700, 600, 500]
+
+def f_aggiungi_tv_thetae(df):
+    """
+    Temperatura virtuale (Tv) e temperatura potenziale equivalente (theta-e)
+    per ciascun livello, piu' il gradiente 850-500hPa di theta-e (stesso
+    ingrediente della formula CCSI). Assume t_XXX in Kelvin, q_XXX in kg/kg.
+
+    q e' limitata a un range fisico plausibile prima di qualunque calcolo
+    (evita mixing_ratio_from_specific_humidity q/(1-q) esploso per q anomali),
+    e td viene limitato dopo il calcolo (stesso principio del limite assoluto
+    gia' applicato a f_dewpoint) perche' equivalent_potential_temperature usa
+    un esponenziale nella formula di Bolton: anche un td finito ma estremo
+    puo' produrre overflow -> inf a valle.
+    """
+    df = df.copy()
+    for p in LIVELLI_HPA:
+        t = df[f't_{p}'].values * units.kelvin
+        q = np.clip(df[f'q_{p}'].values, 0, 0.05) * units('kg/kg')  # 0.05 kg/kg e' gia' generoso per l'atmosfera reale
+        mr = mixing_ratio_from_specific_humidity(q)
+
+        td = dewpoint_from_specific_humidity(p * units.hPa, t, q)
+        td_sicuro = np.clip(td.to('degC').magnitude, -90.0, 50.0) * units.degC
+
+        df[f'tv_{p}'] = virtual_temperature(t, mr).magnitude
+        df[f'thetae_{p}'] = equivalent_potential_temperature(p * units.hPa, t, td_sicuro).magnitude
+
+    df['thetae_grad_850_500'] = df['thetae_500'] - df['thetae_850']
+    return df
+
+
+from metpy.calc import parcel_profile, cape_cin
+
+def f_aggiungi_cape_cin(df):
+    """
+    CAPE/CIN surface-based dal profilo t_XXX/q_XXX. Riga per riga (nessuna
+    vettorizzazione nativa in MetPy per profili multipli) - testa prima i
+    tempi su un sottoinsieme, es. df.iloc[:200], prima di lanciarlo su tutto.
+    """
+    livelli_p = np.array(LIVELLI_HPA) * units.hPa
+    fallito_lista, cape_lista, cin_lista = [], [], []
+
+    for _, riga in df.iterrows():
+        t_prof = np.array([riga[f't_{p}'] for p in LIVELLI_HPA]) * units.kelvin
+        q_prof = np.array([riga[f'q_{p}'] for p in LIVELLI_HPA]) * units('kg/kg')
+        td_prof = dewpoint_from_specific_humidity(livelli_p, t_prof, q_prof)
+
+        try:
+            prof_parcella = parcel_profile(livelli_p, t_prof[0], td_prof[0])
+            cape, cin = cape_cin(livelli_p, t_prof, td_prof, prof_parcella)
+            cape_lista.append(cape.magnitude)
+            cin_lista.append(cin.magnitude)
+            fallito_lista.append(0)
+        except Exception:
+            # LFC/EL non trovati -> interpretazione fisica: nessuna
+            # instabilita' convettiva rilevata, non un dato mancante.
+            cape_lista.append(0.0)
+            cin_lista.append(0.0)
+            fallito_lista.append(1)
+
+    df = df.copy()
+    df['cape_sb'] = cape_lista
+    df['cin_sb'] = cin_lista
+    df['cape_cin_flag_fallito'] = fallito_lista
+    return df
+
+
+from metpy.calc import bulk_shear
+
+def f_aggiungi_bulk_shear_profilo(df, profondita_m=6000):
+    """
+    Bulk shear sull'intero profilo verticale (uso di gh_XXX come altezze reali),
+    su uno strato di profondita' 'profondita_m' a partire dal livello piu' basso
+    disponibile. La profondita' viene limitata dinamicamente riga per riga
+    all'estensione reale del profilo: in aria fredda lo spessore 1000-500hPa
+    si restringe e una profondita' fissa (es. 6000m) puo' non starci.
+    """
+    livelli_p = np.array(LIVELLI_HPA) * units.hPa
+    fallito_lista, shear_u_lista, shear_v_lista = [], [], []
+
+    for _, riga in df.iterrows():
+        u_prof = np.array([riga[f'u_{p}'] for p in LIVELLI_HPA]) * units('m/s')
+        v_prof = np.array([riga[f'v_{p}'] for p in LIVELLI_HPA]) * units('m/s')
+        h_prof = np.array([riga[f'gh_{p}'] for p in LIVELLI_HPA]) * units.meter
+
+        estensione_disponibile = (h_prof[-1] - h_prof[0]).magnitude
+        profondita_effettiva = min(profondita_m, estensione_disponibile * 0.95)
+
+        try:
+            su, sv = bulk_shear(livelli_p, u_prof, v_prof, height=h_prof,
+                                 depth=profondita_effettiva * units.meter)
+            shear_u_lista.append(su.magnitude)
+            shear_v_lista.append(sv.magnitude)
+            fallito_lista.append(0)
+        except Exception:
+            shear_u_lista.append(0.0)
+            shear_v_lista.append(0.0)
+            fallito_lista.append(1)
+
+    df = df.copy()
+    df['shear_u_0_6km'] = shear_u_lista
+    df['shear_v_0_6km'] = shear_v_lista
+    df['shear_mod_0_6km'] = np.hypot(np.array(shear_u_lista), np.array(shear_v_lista))
+    df['shear_flag_fallito'] = fallito_lista
+    return df
+
+
+def f_aggiungi_omega_integrato(df):
+    """
+    Media della velocita' verticale (omega, Pa/s) sullo strato 850-500hPa,
+    piu' il valore minimo (massima ascendenza, assumendo la convenzione
+    standard: omega negativo = moto ascendente). Verifica la convenzione di
+    segno del tuo modello prima di fidarti dell'interpretazione fisica.
+    """
+    df = df.copy()
+    colonne_w = ['w_850', 'w_800', 'w_700', 'w_500']
+    df['omega_mean_850_500'] = df[colonne_w].mean(axis=1)
+    df['omega_min_850_500'] = df[colonne_w].min(axis=1)  # ascendenza massima
+    return df
+
+
+def f_aggiungi_flusso_umidita(df):
+    """Modulo del flusso di umidita' nei bassi livelli (q_925 * velocita' del vento a 925hPa)."""
+    df = df.copy()
+    vento_925 = np.hypot(df['u_925'], df['v_925'])
+    df['flusso_umidita_925'] = df['q_925'] * vento_925
+    return df
+
+
+def f_aggiungi_zero_termico_relativo(df, elevazione_stazione):
+    """
+    Quota dello zero termico meno l'elevazione della stazione: valori negativi
+    indicano che la stazione e' sopra lo zero termico (precipitazione
+    potenzialmente nevosa, non piovosa).
+    """
+    df = df.copy()
+    df['zeroT_relativo'] = df['zeroT'] - elevazione_stazione
+    return df
+
+
+def f_aggiungi_depressione_rugiada(df):
+    """Differenza t2m - td2m: piu' vicina a zero, piu' l'aria al suolo e' vicina alla saturazione."""
+    df = df.copy()
+    df['depressione_rugiada_2m'] = df['2t'] - df['2d']
+    return df
+
+
+def f_aggiungi_frazione_convettiva(df):
+    """
+    Frazione della pioggia totale attribuita a convezione (cp/tp). Quando
+    tp=0 la frazione e' concettualmente indefinita, ma qui si usa 0 come
+    default (nessuna pioggia -> nessuna frazione convettiva da segnalare),
+    con un flag per distinguere questo caso da una frazione convettiva
+    davvero nulla in presenza di pioggia.
+    """
+    df = df.copy()
+    tp_zero = df['tp'] <= 0
+    df['frazione_convettiva'] = np.where(tp_zero, 0.0, df['cp'] / df['tp'].replace(0, np.nan))
+    df['frazione_convettiva_flag_tp_zero'] = tp_zero.astype(int)
+    return df
+
+
+def f_aggiungi_rapporto_raffica(df):
+    """
+    Raffica massima 3h / velocita' media del vento a 10m. Con vento quasi
+    calmo il rapporto esploderebbe (o darebbe NaN a vento esattamente zero)
+    pur essendo un caso fisicamente informativo (raffica con flusso medio
+    debole = turbolenza locale) - si applica un pavimento minimo alla
+    velocita' invece di azzerare o scartare, cosi' il rapporto resta alto
+    ma finito invece di NaN.
+    """
+    df = df.copy()
+    vento_10m = np.hypot(df['10u'], df['10v'])
+    vento_10m_pavimento = vento_10m.clip(lower=0.5)  # m/s
+    df['rapporto_raffica'] = df['10gust3max'] / vento_10m_pavimento
     return df

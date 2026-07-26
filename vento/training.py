@@ -27,6 +27,16 @@ from config_percorsi_Daniele import CARTELLA_REPO_ROOT
 cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
+# Patch di compatibilità: sklearn 1.9 richiede sample_weight in _generate_sample_indices,
+# ma sklearn_quantile (0.1.1) la chiama ancora senza. Va fatto PRIMA di importare sklearn_quantile.
+import sklearn.ensemble._forest as _forest_mod
+_generate_sample_indices_originale = _forest_mod._generate_sample_indices
+
+def _generate_sample_indices_patch(random_state, n_samples, n_samples_bootstrap, sample_weight=None):
+    return _generate_sample_indices_originale(random_state, n_samples, n_samples_bootstrap, sample_weight)
+
+_forest_mod._generate_sample_indices = _generate_sample_indices_patch
+
 from funzioni import QRF_model
 from funzioni import RF_model
 from funzioni import f_salva_pickle
@@ -63,13 +73,6 @@ for stazione in df_stazioni.index:
     df_osservati = pd.read_csv(f'{cartella_lavoro}/osservati/{stazione}.csv', index_col=0, parse_dates=True)[['WSPDM', 'WSPDX', 'WDIRP']]
     df_osservati = df_osservati.dropna(axis=1, how='all')
     
-    # !!! Per il momento devo togliere gli osservati dai dataframe concatenati,
-    # !!! ma devo aggiornare la procedura di concatenzione.
-    vecchi_osservati = ['Tmin', 'Tmean', 'Tmax', 'Direzione', 'Modulo', 'Raffica', 'Direzione raffica']
-    df_0_24 = df_0_24.drop(columns=vecchi_osservati, errors='ignore')
-    df_24_48 = df_24_48.drop(columns=vecchi_osservati, errors='ignore')
-    df_48_72 = df_48_72.drop(columns=vecchi_osservati, errors='ignore')
-    
     df_0_24 = pd.concat([df_0_24, df_osservati], axis=1)
     df_24_48 = pd.concat([df_24_48, df_osservati], axis=1)
     df_48_72 = pd.concat([df_48_72, df_osservati], axis=1)
@@ -81,7 +84,7 @@ for stazione in df_stazioni.index:
                 ['Stazione ', stazione, df_stazioni.index],
                 ['Intervallo ', intervallo, ['0_24', '24_48', '48_72']],
                 ['Osservato ', osservato, df_osservati.columns.tolist()]
-                ])
+            ])
             df = df_int.drop(columns=[x for x in ['WSPDM', 'WSPDX', 'WDIRP'] if x != osservato], errors='ignore').dropna().copy()
                         
             prefisso_modello = 'RF' if osservato == 'WDIRP' else 'QRF'

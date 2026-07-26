@@ -3,6 +3,10 @@ import warnings
 warnings.simplefilter('ignore', FutureWarning)
 warnings.simplefilter('ignore', UserWarning)
 warnings.filterwarnings('ignore', message='IProgress not found.*')
+warnings.filterwarnings('ignore', message='invalid value encountered in multiply')
+warnings.filterwarnings('ignore', message='invalid value encountered in power')
+warnings.filterwarnings('ignore', message='overflow encountered in exp')
+warnings.filterwarnings('ignore', message='overflow encountered in multiply')
 
 import os
 import sys
@@ -31,6 +35,17 @@ from funzioni import f_errori_classificazione
 from funzioni import f_plot_heatmap_verifica
 from funzioni import f_soglia_ottima_hss
 from funzioni import f_precision_riscalata
+from funzioni import f_aggiungi_indici_instabilita
+from funzioni import f_aggiungi_wind_shear
+from funzioni import f_aggiungi_tv_thetae
+from funzioni import f_aggiungi_cape_cin
+from funzioni import f_aggiungi_bulk_shear_profilo
+from funzioni import f_aggiungi_omega_integrato
+from funzioni import f_aggiungi_flusso_umidita
+from funzioni import f_aggiungi_zero_termico_relativo
+from funzioni import f_aggiungi_depressione_rugiada
+from funzioni import f_aggiungi_frazione_convettiva
+from funzioni import f_aggiungi_rapporto_raffica
 
 from danilib import f_log_ciclo_for
 
@@ -62,6 +77,7 @@ colori = {'0_24': 'tab:blue', '24_48': 'tab:orange', '48_72': 'tab:green'}
 def f_modelli_cla(nome, scale_pos_weight=1.0):
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
+    from sklearn.impute import SimpleImputer
 
     # RandomUnderSampler scarta casualmente osservazioni della classe
     # maggioritaria (dry) fino a pareggiare le due classi - stesso approccio
@@ -73,6 +89,7 @@ def f_modelli_cla(nome, scale_pos_weight=1.0):
     if nome == 'logReg':
         return make_pipeline_imb(
             sampler,
+            SimpleImputer(strategy='median'),
             StandardScaler(),
             LogisticRegression(class_weight='balanced', max_iter=1000, penalty='elasticnet', solver='saga', l1_ratio=0.5)
         )
@@ -111,6 +128,23 @@ for stazione in df_stazioni.index:
         for osservato in ['RAIN03HX']:
             f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index]])
             df = df_int.copy()
+            df = f_aggiungi_indici_instabilita(df)
+            df = f_aggiungi_wind_shear(df, livello_basso='925', livello_alto='500')
+            df = f_aggiungi_tv_thetae(df)
+            df = f_aggiungi_cape_cin(df)
+            df = f_aggiungi_bulk_shear_profilo(df)
+            df = f_aggiungi_omega_integrato(df)
+            df = f_aggiungi_flusso_umidita(df)
+            df = f_aggiungi_zero_termico_relativo(df, df_stazioni.loc[stazione,'Altitude'])
+            df = f_aggiungi_depressione_rugiada(df)
+            df = f_aggiungi_frazione_convettiva(df)
+            df = f_aggiungi_rapporto_raffica(df)
+
+            colonne_numeriche = df.select_dtypes(include='number').columns
+            n_inf = np.isinf(df[colonne_numeriche]).sum().sum()
+            if n_inf > 0:
+                print(f"{stazione} - {intervallo}: {n_inf} valori infiniti trovati, convertiti in NaN")
+                raise
 
             percorso_salvataggio = f'{cartella_modelli_allenati}/{modello}/{stazione}/{nome_modello}_{stazione}_{intervallo}_{osservato}.pkl'
             if os.path.exists(percorso_salvataggio) and not ast.literal_eval(config.get('COMMON', 'rifai_il_training')):
@@ -213,17 +247,17 @@ for stazione in df_stazioni.index:
 
                 print(f"\n{tabulate(df_verifica, tablefmt='simple', headers='keys')}\n")
                 f_plot_heatmap_verifica(df_verifica, titolo=f'{stazione} - {intervallo} - {nome_modello} (pioggia/no-pioggia) vs RAW')
-                from sklearn.calibration import calibration_curve
+                # from sklearn.calibration import calibration_curve
                 
-                frac_pos, mean_pred = calibration_curve(y_val, prob_val, n_bins=10, strategy='uniform')
-                plt.figure(figsize=(4, 4))
-                plt.plot([0, 1], [0, 1], 'k--', lw=1)
-                plt.plot(mean_pred, frac_pos, 'o-', color='tab:blue', markersize=3)
-                plt.xlabel('Probabilità prevista (media per bin)')
-                plt.ylabel('Frequenza osservata')
-                plt.title(f'{stazione} - {intervallo} - Reliability diagram')
-                plt.show()
-                plt.close()
+                # frac_pos, mean_pred = calibration_curve(y_val, prob_val, n_bins=10, strategy='uniform')
+                # plt.figure(figsize=(4, 4))
+                # plt.plot([0, 1], [0, 1], 'k--', lw=1)
+                # plt.plot(mean_pred, frac_pos, 'o-', color='tab:blue', markersize=3)
+                # plt.xlabel('Probabilità prevista (media per bin)')
+                # plt.ylabel('Frequenza osservata')
+                # plt.title(f'{stazione} - {intervallo} - Reliability diagram')
+                # plt.show()
+                # plt.close()
 
                 sss
             ################################ Salvataggi

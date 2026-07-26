@@ -19,17 +19,17 @@ else:
     
 # for oggi in pd.date_range('2026-06-01', '2026-06-25', freq='1d'):
 
-# comando = f"{ESEGUIBILE_PYTHON} {cartella_estrazioni}/estrazioni.py {oggi.strftime('%Y-%m-%d')}"
-# print(comando, '\n')
-# os.system(comando)
-#
-# comando = f"{ESEGUIBILE_PYTHON} {cartella_estrazioni}/concatenazioni.py {oggi.strftime('%Y-%m-%d')}"
-# print('\n', comando, '\n')
-# os.system(comando)
+comando = f"{ESEGUIBILE_PYTHON} {cartella_estrazioni}/estrazioni.py {oggi.strftime('%Y-%m-%d')}"
+print(comando, '\n')
+os.system(comando)
 
-# comando = f"{ESEGUIBILE_PYTHON} {cartella_QRF}/temperatura/predict.py {oggi.strftime('%Y-%m-%d')}"
-# print('\n', comando, '\n')
-# os.system(comando)
+comando = f"{ESEGUIBILE_PYTHON} {cartella_estrazioni}/concatenazioni.py {oggi.strftime('%Y-%m-%d')}"
+print('\n', comando, '\n')
+os.system(comando)
+
+comando = f"{ESEGUIBILE_PYTHON} {cartella_QRF}/temperatura/predict.py {oggi.strftime('%Y-%m-%d')}"
+print('\n', comando, '\n')
+os.system(comando)
 
 comando = f"{ESEGUIBILE_PYTHON} {cartella_QRF}/vento/predict.py {oggi.strftime('%Y-%m-%d')}"
 print('\n', comando, '\n')

@@ -4,6 +4,7 @@ warnings.simplefilter('ignore', UserWarning)
 warnings.filterwarnings('ignore', message='IProgress not found.*')
 
 import os
+import sys
 import ast
 import configparser
 
@@ -17,8 +18,10 @@ from tabulate import tabulate
 
 plt.rc('font', weight='normal', size=6)
 
-# cartella_lavoro = '/run/media/daniele.carnevale/Daniele2TB/repo/QRF'
-cartella_lavoro = '/media/daniele/Daniele2TB/repo/QRF'
+sys.path.insert(0, os.path.expanduser('~/.config'))
+from config_percorsi_Daniele import CARTELLA_REPO_ROOT
+
+cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF/pioggia')
 os.chdir(cartella_lavoro)
 
 from funzioni import f_salva_pickle
@@ -29,11 +32,11 @@ from funzioni import CalibratoreEstremi
 from danilib import f_log_ciclo_for
 
 config = configparser.ConfigParser()
-config.read('./config.ini')
+config.read('./../config.ini')
 
 modello = config.get('COMMON', 'modello')
-cartella_dataset = f"{config.get('COMMON', 'cartella_dataset')}/{modello}"
-cartella_modelli_allenati = f"{config.get('COMMON', 'cartella_modelli_allenati')}/pioggia/modelli_allenati"
+cartella_dataset = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_dataset')}/{modello}")
+cartella_modelli_allenati = os.path.join(CARTELLA_REPO_ROOT, f"{config.get('COMMON', 'cartella_modelli_allenati')}/pioggia/modelli_allenati")
 os.makedirs(f'{cartella_modelli_allenati}/{modello}', exist_ok=True)
 
 colori = {'0_24': 'tab:blue', '24_48': 'tab:orange', '48_72': 'tab:green'}
@@ -44,7 +47,7 @@ metodo_calibrazione = 'qrf'
 prefisso_salvataggio = 'QRF'
 
 # %%
-df_stazioni = pd.read_csv(f'{cartella_lavoro}/pioggia/df_coordinate.csv', index_col=0)
+df_stazioni = pd.read_csv(f'{cartella_lavoro}/../pioggia/df_coordinate.csv', index_col=0)
 
 for stazione in df_stazioni.index:
     try:
@@ -56,14 +59,7 @@ for stazione in df_stazioni.index:
     df_24_48 = pd.read_csv(f'{cartella_dataset}/df_{stazione}_24_48.csv', index_col=0, parse_dates=True)
     df_48_72 = pd.read_csv(f'{cartella_dataset}/df_{stazione}_48_72.csv', index_col=0, parse_dates=True)
 
-    df_osservati = pd.read_csv(f'{cartella_lavoro}/osservati/{stazione}.csv', index_col=0, parse_dates=True)['RAIN03HX']
-
-    # !!! Per il momento devo togliere gli osservati dai dataframe concatenati,
-    # !!! ma devo aggiornare la procedura di concatenzione.
-    vecchi_osservati = ['Tmin', 'Tmean', 'Tmax', 'Direzione', 'Modulo', 'Raffica', 'Direzione raffica']
-    df_0_24 = df_0_24.drop(columns=vecchi_osservati, errors='ignore')
-    df_24_48 = df_24_48.drop(columns=vecchi_osservati, errors='ignore')
-    df_48_72 = df_48_72.drop(columns=vecchi_osservati, errors='ignore')
+    df_osservati = pd.read_csv(f'{cartella_lavoro}/../osservati/{stazione}.csv', index_col=0, parse_dates=True)['RAIN03HX']
 
     df_0_24 = pd.concat([df_0_24, df_osservati], axis=1).dropna()
     df_24_48 = pd.concat([df_24_48, df_osservati], axis=1).dropna()
