@@ -238,6 +238,7 @@ def RF_model():
 
 def f_scomposizione_seno_coseno(a):
     return np.column_stack([np.sin(np.radians(a)), np.cos(np.radians(a))])
+    # return np.column_stack([-np.sin(np.radians(a)), -np.cos(np.radians(a))])
 
 
 def f_ricomposizione_seno_cose(a):
@@ -246,7 +247,7 @@ def f_ricomposizione_seno_cose(a):
 
 def f_errore_circolare(obs_deg, pred_deg):
     return (pred_deg - obs_deg + 180) % 360 - 180
-
+    # return np.degrees(np.arctan2(-a[:, 0], -a[:, 1])) % 360
 
 # ============================================================================
 # Correzione prior per classificatori allenati su dati ribilanciati
@@ -1354,7 +1355,7 @@ def f_aggiungi_tv_thetae(df):
     return df
 
 
-from metpy.calc import parcel_profile, cape_cin
+from metpy.calc import parcel_profile, cape_cin, relative_humidity_from_specific_humidity
 
 def f_aggiungi_cape_cin(df):
     """
@@ -1499,3 +1500,130 @@ def f_aggiungi_rapporto_raffica(df):
     vento_10m_pavimento = vento_10m.clip(lower=0.5)  # m/s
     df['rapporto_raffica'] = df['10gust3max'] / vento_10m_pavimento
     return df
+
+LIVELLI_HPA_TUTTI = [1000, 950, 925, 900, 850, 800, 700, 600, 500]
+LIVELLI_HPA_OMEGA = [925, 900, 850, 800, 700, 500]  # unici livelli con 'w_XXX' disponibile
+
+def f_aggiungi_rh_quota(df):
+    """
+    Umidita' relativa (RH, %) ai livelli in quota indicati, dalle colonne
+    t_XXX (temperatura, K) e q_XXX (umidita' specifica, kg/kg) gia' presenti
+    (nessuna estrazione aggiuntiva). Analoga a f_aggiungi_indici_instabilita.
+    """
+    df = df.copy()
+    for p in LIVELLI_HPA_TUTTI:
+        t = df[f't_{p}'].values * units.kelvin
+        q = df[f'q_{p}'].values * units('g/kg')
+        pressione = p * units.hPa
+        rh = relative_humidity_from_specific_humidity(pressione, t, q).to('percent').magnitude
+        df[f'r_{p}'] = np.clip(rh, 0.0, 100.0)  # limite fisico
+    return df
+
+
+# ============================================================================
+# GPD via gradient boosting (ispirato a gbex - Velthoen, Dombry, Cai, Engelke,
+# "Gradient boosting for extreme quantile regression", Extremes 2023 - il
+# pacchetto originale e' R, github.com/JVelthoen/gbex). Reimplementazione
+# Python con obiettivo custom XGBoost. SEMPLIFICAZIONE DELIBERATA: la forma
+# (gamma) e' stimata una volta sola via MLE sul pool degli eccessi di
+# training (non dipende dalle covariate); solo la scala (sigma) e' "boostata"
+# in funzione delle covariate. Usato da training_gpd.py e training_cla_gpd.py.
+# ============================================================================
+
+def f_gpd_quantile(sigma, gamma, p):
+    """Quantile p della GPD (eccesso oltre soglia), dati sigma (array) e gamma (scalare)."""
+    if abs(gamma) < 1e-6:
+        return -sigma * np.log(1 - p)
+    return (sigma / gamma) * ((1 - p) ** (-gamma) - 1)
+
+
+def f_gpd_media(sigma, gamma):
+    """Media della GPD (eccesso oltre soglia): definita solo per gamma < 1, altrimenti NaN."""
+    return np.where(gamma < 1, sigma / (1 - gamma), np.nan)
+
+
+def f_obiettivo_gpd_sigma(gamma_fisso):
+    """
+    Obiettivo custom XGBoost: gradiente e hessiana della negative log-
+    likelihood GPD rispetto a eta=log(sigma) (link log, garantisce sigma>0),
+    a gamma fissato. Derivazione analitica valida in modo uniforme anche nel
+    limite gamma->0 (caso esponenziale): nessun ramo speciale necessario.
+    """
+    def obiettivo(predt, dtrain):
+        z = dtrain.get_label()
+        sigma = np.exp(predt)
+        w = z / sigma
+        denom = np.clip(1 + gamma_fisso * w, 1e-6, None)
+        grad = 1 - (1 + gamma_fisso) * w / denom
+        hess = (1 + gamma_fisso) * w / denom**2
+        hess = np.clip(hess, 1e-6, None)  # xgboost richiede hessiana positiva
+        return grad, hess
+    return obiettivo
+
+
+class GPDBoosting:
+    """
+    Modello GPD con scala dipendente dalle covariate via gradient boosting
+    (XGBoost, obiettivo custom) e forma fissa (MLE sul pool degli eccessi di
+    training). Interfaccia fit/predict, sullo stile del resto della pipeline.
+    """
+
+    def __init__(self, n_estimators=200, max_depth=3, learning_rate=0.05):
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.gamma_ = None
+        self.booster_ = None
+        self.campi_ = None
+        self.eta_iniziale_ = None
+
+    def fit(self, X, z):
+        """X: covariate (solo righe di eccedenza). z: eccessi (y - soglia), tutti > 0."""
+        self.campi_ = X.columns.tolist()
+
+        gamma_stimato, _, _ = stats.genpareto.fit(z, floc=0)
+        # Clip di sicurezza: gamma molto negativo implicherebbe un limite
+        # superiore fisico vicinissimo alla soglia (poco plausibile per la
+        # pioggia), gamma molto positivo rende la coda quasi non-integrabile.
+        self.gamma_ = float(np.clip(gamma_stimato, -0.5, 1.5))
+
+        self.eta_iniziale_ = float(np.log(max(z.mean(), 1e-3)))
+
+        dtrain = xgb.DMatrix(X[self.campi_], label=z)
+        dtrain.set_base_margin(np.full(len(z), self.eta_iniziale_))
+
+        params = {
+            'max_depth': self.max_depth,
+            'eta': self.learning_rate,
+            'disable_default_eval_metric': 1,
+            'verbosity': 0,
+        }
+        self.booster_ = xgb.train(
+            params, dtrain, num_boost_round=self.n_estimators,
+            obj=f_obiettivo_gpd_sigma(self.gamma_)
+        )
+        return self
+
+    def predict_sigma(self, X):
+        d = xgb.DMatrix(X[self.campi_])
+        d.set_base_margin(np.full(X.shape[0], self.eta_iniziale_))
+        eta = self.booster_.predict(d, output_margin=True)
+        return np.exp(eta)
+
+    def predict_quantili(self, X, quantili):
+        """Ritorna un DataFrame con i quantili richiesti (in mm di ECCESSO, non ancora + soglia) e la media."""
+        sigma = self.predict_sigma(X)
+        df_out = pd.DataFrame(index=X.index)
+        for p in quantili:
+            df_out[p] = f_gpd_quantile(sigma, self.gamma_, p)
+        df_out['media'] = f_gpd_media(sigma, self.gamma_)
+        return df_out
+
+    def feature_importances(self, importance_type='gain'):
+        """
+        Nota: a differenza di feature_importances_ di sklearn (normalizzata,
+        somma a 1), get_score(importance_type='gain') di XGBoost restituisce
+        il gain medio grezzo per split - scala arbitraria, non normalizzata.
+        """
+        punteggi = self.booster_.get_score(importance_type=importance_type)
+        return pd.Series({c: punteggi.get(c, 0.0) for c in self.campi_})

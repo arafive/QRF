@@ -36,6 +36,7 @@ from funzioni import f_plot_heatmap_verifica
 from funzioni import f_soglia_ottima_hss
 from funzioni import f_precision_riscalata
 from funzioni import f_aggiungi_indici_instabilita
+from funzioni import f_aggiungi_rh_quota
 from funzioni import f_aggiungi_wind_shear
 from funzioni import f_aggiungi_tv_thetae
 from funzioni import f_aggiungi_cape_cin
@@ -103,7 +104,7 @@ def f_modelli_cla(nome, scale_pos_weight=1.0):
             )
         )
     else:
-        raise
+        raise ValueError('Modello non trovato')
     
 df_stazioni = pd.read_csv(f'{cartella_lavoro}/../pioggia/df_coordinate.csv', index_col=0)
 
@@ -129,6 +130,7 @@ for stazione in df_stazioni.index:
             f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index]])
             df = df_int.copy()
             df = f_aggiungi_indici_instabilita(df)
+            df = f_aggiungi_rh_quota(df)
             df = f_aggiungi_wind_shear(df, livello_basso='925', livello_alto='500')
             df = f_aggiungi_tv_thetae(df)
             df = f_aggiungi_cape_cin(df)
@@ -143,8 +145,7 @@ for stazione in df_stazioni.index:
             colonne_numeriche = df.select_dtypes(include='number').columns
             n_inf = np.isinf(df[colonne_numeriche]).sum().sum()
             if n_inf > 0:
-                print(f"{stazione} - {intervallo}: {n_inf} valori infiniti trovati, convertiti in NaN")
-                raise
+                raise ValueError(f"{stazione} - {intervallo}: {n_inf} valori infiniti trovati nelle feature")
 
             percorso_salvataggio = f'{cartella_modelli_allenati}/{modello}/{stazione}/{nome_modello}_{stazione}_{intervallo}_{osservato}.pkl'
             if os.path.exists(percorso_salvataggio) and not ast.literal_eval(config.get('COMMON', 'rifai_il_training')):
@@ -259,7 +260,7 @@ for stazione in df_stazioni.index:
                 # plt.show()
                 # plt.close()
 
-                sss
+                # sss
             ################################ Salvataggi
 
             os.makedirs(f'{cartella_modelli_allenati}/{modello}/{stazione}', exist_ok=True)
@@ -271,5 +272,6 @@ for stazione in df_stazioni.index:
             }
 
             f_salva_pickle(dict_model, percorso_salvataggio)
+            sss
 
 print('\n\nDone')

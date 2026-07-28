@@ -1,5 +1,12 @@
 
 import os
+
+os.environ.setdefault('OMP_NUM_THREADS', '4')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '4')
+os.environ.setdefault('MKL_NUM_THREADS', '4')
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '4')
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '4')
+
 import sys
 import ast
 import configparser
@@ -47,8 +54,8 @@ os.makedirs(cartella_previsioni, exist_ok=True)
 df_stazioni = pd.read_csv(f'{cartella_lavoro}/umidita/df_coordinate.csv', index_col=0)
 
 for stazione in df_stazioni.index:
-    if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
-        continue
+    # if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
+    #     continue
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
     

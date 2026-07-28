@@ -45,8 +45,8 @@ config = configparser.ConfigParser()
 config.read('./config.ini')
 
 modello = config.get('COMMON', 'modello')
-cartella_dataset = f"{config.get('COMMON', 'cartella_dataset')}/{modello}"
-cartella_modelli_allenati = f"{config.get('COMMON', 'cartella_modelli_allenati')}/temperatura/modelli_allenati"
+cartella_dataset = f"{cartella_lavoro}/../{config.get('COMMON', 'cartella_dataset')}/{modello}"
+cartella_modelli_allenati = f"{cartella_lavoro}/temperatura/modelli_allenati"
 os.makedirs(f'{cartella_modelli_allenati}/{modello}', exist_ok=True)
 
 colori = {'0_24': 'tab:blue', '24_48': 'tab:orange', '48_72': 'tab:green'}
