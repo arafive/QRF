@@ -33,7 +33,7 @@ if len(sys.argv) > 1:
     data_arg = ' '.join(sys.argv[1:])
     data = pd.Timestamp(data_arg)
 else:
-    data = pd.Timestamp('2026-07-14')
+    data = pd.Timestamp('2026-08-03')
 
 print(data)
 
@@ -51,8 +51,8 @@ os.makedirs(cartella_previsioni, exist_ok=True)
 df_stazioni = pd.read_csv(f'{cartella_lavoro}/temperatura/df_coordinate.csv', index_col=0)
 
 for stazione in df_stazioni.index:
-    # if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
-    #     continue
+    if os.path.exists(f"{cartella_previsioni}/{stazione}.csv"):
+        continue
     
     f_log_ciclo_for([['Stazione ', stazione, df_stazioni.index.tolist()]])
 
@@ -152,6 +152,9 @@ for stazione in df_stazioni.index:
     df_previsioni_tot = df_previsioni_tot.rename(columns=dict_colonne)
     
     df_previsioni_tot = df_previsioni_tot.astype(float)
-    df_previsioni_tot.to_csv(f"{cartella_previsioni}/{stazione}.csv", index=True, header=True, mode='w', na_rep=np.nan)
+    try:
+        df_previsioni_tot.to_csv(f"{cartella_previsioni}/{stazione}.csv", index=True, header=True, mode='w', na_rep=np.nan)
+    except OSError:
+        continue
 
 print('\n\nDone')
