@@ -5,4 +5,5 @@ osservati/
 __pycache__/
 temperatura/climatologie/
 script_vecchi/
-
+*.png
+temperatures_*.json
