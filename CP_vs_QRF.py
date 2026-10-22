@@ -17,8 +17,8 @@ from config_percorsi_Daniele import CARTELLA_REPO_ROOT
 cartella_lavoro = os.path.join(CARTELLA_REPO_ROOT, 'QRF')
 os.chdir(cartella_lavoro)
 
-# cartella_osservati = "/home/cfmi.arpal.org/daniele.carnevale/Scrivania/QRF/osservati"
-cartella_osservati = "/media/daniele/Daniele2TB/repo/QRF/osservati"
+cartella_osservati = "/home/cfmi.arpal.org/daniele.carnevale/Scrivania/QRF/osservati"
+# cartella_osservati = "/media/daniele/Daniele2TB/repo/QRF/osservati"
 
 def f_errori_regressione(osservato, previsto, nome_df=None):
     """Funzione per gli errori di regressione."""
@@ -104,7 +104,7 @@ df_coordinate = pd.read_csv('temperatura/df_coordinate.csv', index_col=0, parse_
 
 # %%
 
-with open('temperatures_202609221247.json', 'r') as f:
+with open('temperatures_202610130853.json', 'r') as f:
     testo = f.read().strip()
 
 testo = testo[1:-1]
@@ -346,7 +346,7 @@ for s in stazioni:
         if i == 0:
             ax.legend(ncol=2, ncols=3, loc='lower center')
         if i == 0:
-            ax.set_title("Analisi: 1 gen - 22 sett 2026", loc='right')
+            ax.set_title("Analisi: 1 gen 2024 - 12 ott 2026", loc='right')
             ax.set_title(f"{df_coordinate.loc[s]['Name']}", loc='left')
         
     plt.tight_layout()
